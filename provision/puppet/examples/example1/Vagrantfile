@@ -1,0 +1,63 @@
+PUPPET_SERVER_IP="192.168.33.10"
+PUPPET_AGENT1_IP="192.168.33.11"
+PUPPET_AGENT2_IP="192.168.33.12"
+
+
+Vagrant.configure("2") do |config|
+
+  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
+
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 2048
+    v.cpus = 2
+  end
+
+  config.vm.provision "shell", inline: %Q{
+    echo "export PATH=$PATH:/opt/puppetlabs/bin:/opt/puppetlabs/puppet/bin" > /etc/profile.d/puppet-path.sh
+  }
+
+  config.vm.define "puppetmaster" do |pm|
+    pm.vm.box = "centos/7"
+    pm.vm.network "private_network", ip: PUPPET_SERVER_IP
+    pm.vm.hostname = "puppet.localdomain"
+    pm.vm.provider "virtualbox" do |v|
+      v.memory = 4096
+    end
+    pm.vm.provision "shell", inline: %Q{
+      rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
+      yum -y install git vim tree puppetserver
+      systemctl enable puppetserver
+      systemctl start puppetserver
+      echo "*" > /etc/puppetlabs/puppet/autosign.conf
+    }
+  end
+
+  config.vm.define "puppet-agent-centos" do |pac|
+    pac.vm.box = "centos/7"
+    pac.vm.network "private_network", ip: PUPPET_AGENT1_IP
+    pac.vm.hostname = "agent1.localdomain"
+    pac.vm.provision "shell", inline: %Q{
+      rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
+      yum -y install git vim tree puppetserver
+      echo "#{PUPPET_SERVER_IP}" puppet >> /etc/hosts
+      puppet agent -t
+    }
+  end
+
+  config.vm.define "puppet-agent-ubuntu" do |pau|
+    pau.vm.box = "ubuntu/xenial64"
+    pau.vm.network "private_network", ip: PUPPET_AGENT2_IP
+    pau.vm.hostname = "agent2.localdomain"
+    pau.vm.provision "shell", inline: %Q{
+      apt-get -y update
+      apt-get -y install wget
+      wget http://apt.puppetlabs.com/puppet6-release-xenial.deb -O /tmp/puppet6-release-xenial.deb
+      dpkg -i /tmp/puppet6-release-xenial.deb
+      apt-get -y update
+      apt-get -y install git vim tree puppetserver
+      echo "#{PUPPET_SERVER_IP}" puppet >> /etc/hosts
+      puppet agent -t
+    }
+  end
+
+end
