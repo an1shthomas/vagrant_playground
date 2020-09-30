@@ -1,0 +1,60 @@
+NODE_IP="192.168.60.10"
+
+Vagrant.configure("2") do |config|
+
+  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
+
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 1024 
+    v.cpus = 1
+  end
+
+  config.vm.provision "shell", privileged: false, path: "scripts/ssh_keyless.sh"
+
+  (1..3).each do |i|
+    config.vm.provision "shell", inline: %Q{
+      echo "#{NODE_IP}#{i}" "ubuntu#{i}" >> /etc/hosts
+    }
+  end
+  (4..6).each do |i|
+    config.vm.provision "shell", inline: %Q{
+      echo "#{NODE_IP}#{i}" "centos#{i-3}" >> /etc/hosts
+    }
+  end
+
+  config.vm.define "node0" do |node|
+    node.vm.box = "ubuntu/bionic64"
+    node.vm.hostname = "node0"
+    node.vm.network "private_network", ip: "#{NODE_IP}0"
+    node.vm.provider "virtualbox" do |v|
+      v.memory = 2048
+      v.cpus = 1
+    end
+
+    node.vm.provision "shell", inline: %Q{
+      apt-get -y update
+      apt-get -y install software-properties-common
+      apt-add-repository -y --update ppa:ansible/ansible
+      apt-get -y install ansible
+    }
+  end
+
+  # define 3 ubuntu machines
+  (1..3).each do |i|
+    config.vm.define "ubuntu#{i}" do |node|
+      node.vm.box = "ubuntu/bionic64"
+      node.vm.hostname = "ubuntu#{i}"
+      node.vm.network "private_network", ip: "#{NODE_IP}#{i}"
+    end
+  end
+
+  # define 3 centos machines
+  (4..6).each do |i|
+    config.vm.define "centos#{i-3}" do |node|
+      node.vm.box = "centos/7"
+      node.vm.hostname = "centos#{i-3}"
+      node.vm.network "private_network", ip: "#{NODE_IP}#{i}"
+    end
+  end
+  
+end
