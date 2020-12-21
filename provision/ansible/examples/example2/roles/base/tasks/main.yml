@@ -1,7 +1,7 @@
 - name: add ssh key for anish
   authorized_key:
     user: anish
-    key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDQe5pIDykyen2GtoudQsJu9fdicExirS6OHRnbu5EeZD/YIAIkzJ7iBiMGKNKZYb1iZxi1r8z4Zdb9cnWsH5gj8ifPQC85DplusXJhbHuEbYDDLQsN6j+w2XDNO4AWi6mF6E+N580ZQ46N8PxMTm/2Fi81V+eM22ROLL8BglA5iB9l/0W48RnFYhDUItT8ULEmFivrBrSEG2J0C80JSbjhhQAgEhJQuMHA+GMlctJ5QmhQd65Ui71bcWrTV3i6L3U2MjkmY70O9yQDBIR+/mEegBgT7OeGnDC+SPHFc9Z4vXBXvSE0nAdlIU6DGukcr971yaCdUWBYAg5sqDoJirov vagrant@node0" 
+    key: "ssh-rsa ... vagrant@node0" 
 
 - name: generate sshd_config file from template
   tags: ssh
