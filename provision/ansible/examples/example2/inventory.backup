@@ -1,0 +1,6 @@
+ubuntu1 apache_package=apache2 php_package=libapache2-mod-php
+ubuntu2 apache_package=apache2 php_package=libapache2-mod-php
+ubuntu3 apache_package=apache2 php_package=libapache2-mod-php
+centos4 apache_package=httpd php_package=php
+centos5 apache_package=httpd php_package=php
+centos6 apache_package=httpd php_package=php

@@ -1,0 +1,44 @@
+---
+- hosts: all
+  become: true
+  pre_tasks:
+
+    - name: install updates (CentOS)
+      tags: always
+      yum:
+        update_only: yes
+        update_cache: yes
+      when: ansible_distribution == "CentOS"
+
+    - name: install updates (Ubuntu)
+      tags: always
+      apt:
+        upgrade: 'yes'
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu"
+
+- hosts: all
+  become: true
+  tasks:
+
+    - name: create anish user
+      tags: always
+      user:
+        name: anish
+        groups: root
+
+    - name: add ssh key for anish
+      tags: always
+      authorized_key:
+        user: anish
+        key: ssh-rsa ... vagrant@node0
+
+    - name: add sudoers file for anish
+      tags: always
+      copy:
+        src: sudoer_anish
+        dest: /etc/sudoers.d/anish
+        owner: root
+        group: root
+        mode: 0440
+

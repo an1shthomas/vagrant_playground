@@ -1,0 +1,13 @@
+[web_servers]
+ubuntu1 
+centos4
+
+[db_servers]
+ubuntu2
+centos5
+
+[file_servers]
+ubuntu3
+
+[workstations]
+centos6
