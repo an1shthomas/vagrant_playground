@@ -2,61 +2,82 @@ PUPPET_SERVER_IP="192.168.33.10"
 PUPPET_AGENT1_IP="192.168.33.11"
 PUPPET_AGENT2_IP="192.168.33.12"
 
+ENV['VAGRANT_NO_PARALLEL'] = 'yes'
 
 Vagrant.configure("2") do |config|
 
-  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
+  config.vm.synced_folder ".", "/vagrant", type: "rsync"
 
   config.vm.provider "virtualbox" do |v|
     v.memory = 2048
     v.cpus = 2
   end
 
+  config.vm.provider :libvirt do |v|
+    v.memory    = 2048
+    v.cpus      = 2
+    v.nested    = true
+  end
+   
+
   config.vm.provision "shell", inline: %Q{
     echo "export PATH=$PATH:/opt/puppetlabs/bin:/opt/puppetlabs/puppet/bin" > /etc/profile.d/puppet-path.sh
   }
 
-  config.vm.define "puppetmaster" do |pm|
-    pm.vm.box = "centos/7"
+  config.vm.define "puppet-master" do |pm|
+    pm.vm.box = "centos/8"
     pm.vm.network "private_network", ip: PUPPET_SERVER_IP
     pm.vm.hostname = "puppet.localdomain"
     pm.vm.provider "virtualbox" do |v|
       v.memory = 4096
     end
+    pm.vm.provider "libvirt" do |v|
+      v.memory = 4096
+    end
+
     pm.vm.provision "shell", inline: %Q{
-      rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
+      rpm -Uvh https://yum.puppet.com/puppet7-release-el-8.noarch.rpm
+      # rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
       yum -y install git vim tree puppetserver
+      mkdir -p /etc/puppetlabs/puppet/ssl
+      chown -R puppet /etc/puppetlabs/puppet/ssl
+      echo "*" > /etc/puppetlabs/puppet/autosign.conf
       systemctl enable puppetserver
       systemctl start puppetserver
-      echo "*" > /etc/puppetlabs/puppet/autosign.conf
     }
   end
 
   config.vm.define "puppet-agent-centos" do |pac|
-    pac.vm.box = "centos/7"
+    pac.vm.box = "centos/8"
     pac.vm.network "private_network", ip: PUPPET_AGENT1_IP
     pac.vm.hostname = "agent1.localdomain"
     pac.vm.provision "shell", inline: %Q{
-      rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
-      yum -y install git vim tree puppetserver
+      rpm -Uvh https://yum.puppet.com/puppet7-release-el-8.noarch.rpm
+      # rpm -Uvh https://yum.puppet.com/puppet6-release-el-7.noarch.rpm
+      yum -y install git vim tree puppet-agent
       echo "#{PUPPET_SERVER_IP}" puppet >> /etc/hosts
-      puppet agent -t
+      /opt/puppetlabs/bin/puppet resource service puppet ensure=running enable=true
+      # /opt/puppetlabs/bin/puppet agent -t
     }
   end
 
   config.vm.define "puppet-agent-ubuntu" do |pau|
-    pau.vm.box = "ubuntu/xenial64"
+    pau.vm.box                 = "generic/ubuntu2004"
+    pau.vm.box_check_update    = false
+    pau.vm.box_version         = "3.5.4"
     pau.vm.network "private_network", ip: PUPPET_AGENT2_IP
     pau.vm.hostname = "agent2.localdomain"
     pau.vm.provision "shell", inline: %Q{
       apt-get -y update
       apt-get -y install wget
-      wget http://apt.puppetlabs.com/puppet6-release-xenial.deb -O /tmp/puppet6-release-xenial.deb
-      dpkg -i /tmp/puppet6-release-xenial.deb
+      wget https://apt.puppet.com/puppet7-release-focal.deb -O /tmp/puppet-package.deb
+      # wget http://apt.puppetlabs.com/puppet6-release-xenial.deb -O /tmp/puppet6-release-xenial.deb
+      dpkg -i /tmp/puppet-package.deb
       apt-get -y update
-      apt-get -y install git vim tree puppetserver
+      apt-get -y install git vim tree puppet-agent
       echo "#{PUPPET_SERVER_IP}" puppet >> /etc/hosts
-      puppet agent -t
+      /opt/puppetlabs/bin/puppet resource service puppet ensure=running enable=true
+      # /opt/puppetlabs/bin/puppet agent -t
     }
   end
 
