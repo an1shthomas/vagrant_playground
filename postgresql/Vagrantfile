@@ -1,0 +1,209 @@
+# -*- mode: ruby -*-
+ # vi: set ft=ruby :
+
+# Determine the host OS and architecture
+HOST_OS = RbConfig::CONFIG['host_os']
+HOST_ARCH = RUBY_PLATFORM
+
+# Set box and version based on host OS and architecture
+if HOST_OS =~ /linux/ && HOST_ARCH =~ /x86_64/
+  VAGRANT_BOX = "generic/ubuntu2204"
+  VAGRANT_BOX_VERSION = "4.2.10"
+elsif HOST_OS =~ /darwin/ && HOST_ARCH =~ /arm64/
+  VAGRANT_BOX = "bento/ubuntu-22.04-arm64"
+  VAGRANT_BOX_VERSION = "202401.31.0"
+else
+  raise "Unsupported host OS or architecture"
+end
+
+Vagrant.configure("2") do |config|
+  config.vm.define "postgresql" do |postgresql|
+    postgresql.vm.box = VAGRANT_BOX
+    postgresql.vm.hostname = "postgresql"
+    postgresql.vm.network "private_network", ip: "192.168.199.137"
+
+    # Provisioning script to install PostgreSQL
+    postgresql.vm.provision "shell", inline: <<-SHELL
+# Update the package list
+sudo apt-get update
+
+# Install PostgreSQL
+sudo apt-get install -y postgresql postgresql-contrib
+
+# Set the default password for the postgres user
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+
+# Optionally, you can configure PostgreSQL to allow remote connections
+sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/14/main/postgresql.conf
+sudo echo "host all all all md5" >> /etc/postgresql/14/main/pg_hba.conf
+sudo systemctl restart postgresql
+
+# Create a new PostgreSQL role and database (optional)
+sudo -u postgres psql -c "CREATE ROLE vagrant WITH LOGIN PASSWORD 'vagrant';"
+sudo -u postgres psql -c "CREATE DATABASE vagrant_db OWNER vagrant;"
+
+# Determine the architecture (AMD64 or ARM64)
+ ARCH=$(dpkg --print-architecture)
+ if [ "$ARCH" = "amd64" ]; then
+   PROM_ARCH="linux-amd64"
+   NODE_EXPORTER_ARCH="linux-amd64"
+   PG_EXPORTER_ARCH="linux-amd64"
+elif [ "$ARCH" = "arm64" ]; then
+   PROM_ARCH="linux-arm64"
+   NODE_EXPORTER_ARCH="linux-arm64"
+   PG_EXPORTER_ARCH="linux-arm64"
+else
+   echo "Unsupported architecture: $ARCH"
+   exit 1
+fi
+
+# Install Prometheus
+# Download Prometheus for the detected architecture
+wget https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.$PROM_ARCH.tar.gz
+# Extract the files
+tar xvf prometheus-2.54.1.$PROM_ARCH.tar.gz
+# Move configuration files and binaries to appropriate locations
+sudo mkdir -p /etc/prometheus /var/lib/prometheus
+sudo mv prometheus-2.54.1.$PROM_ARCH/prometheus /usr/local/bin/
+sudo mv prometheus-2.54.1.$PROM_ARCH/promtool /usr/local/bin/
+sudo mv prometheus-2.54.1.$PROM_ARCH/prometheus.yml /etc/prometheus/prometheus.yml
+sudo mv prometheus-2.54.1.$PROM_ARCH/consoles /etc/prometheus
+sudo mv prometheus-2.54.1.$PROM_ARCH/console_libraries /etc/prometheus
+# Cleanup the downloaded tarball and extracted directory
+rm -rf prometheus-2.54.1.$PROM_ARCH.tar.gz prometheus-2.54.1.$PROM_ARCH
+
+# Create a Prometheus user
+sudo useradd --no-create-home --shell /bin/false prometheus
+# Set permissions
+sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
+sudo chown prometheus:prometheus /usr/local/bin/{prometheus,promtool}
+
+# Create a systemd service file for Prometheus
+cat <<EOF | sudo tee /etc/systemd/system/prometheus.service
+[Unit]
+Description=Prometheus Monitoring
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \\
+  --config.file /etc/prometheus/prometheus.yml \\
+  --storage.tsdb.path /var/lib/prometheus/ \\
+  --web.console.templates=/etc/prometheus/consoles \\
+  --web.console.libraries=/etc/prometheus/console_libraries
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd to apply the new service and start Prometheus
+sudo systemctl daemon-reload
+sudo systemctl enable prometheus
+sudo systemctl start prometheus
+
+# Install Node Exporter
+# Download Node Exporter for the detected architecture
+wget https://github.com/prometheus/node_exporter/releases/download/v1.3.1/node_exporter-1.3.1.$NODE_EXPORTER_ARCH.tar.gz
+# Extract the files
+tar xvf node_exporter-1.3.1.$NODE_EXPORTER_ARCH.tar.gz
+# Move the binary to the appropriate location
+sudo mv node_exporter-1.3.1.$NODE_EXPORTER_ARCH/node_exporter /usr/local/bin/
+# Cleanup the downloaded tarball and extracted directory
+rm -rf node_exporter-1.3.1.$NODE_EXPORTER_ARCH.tar.gz node_exporter-1.3.1.$NODE_EXPORTER_ARCH
+
+# Create a Node Exporter user
+sudo useradd --no-create-home --shell /bin/false node_exporter
+# Set permissions
+sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter
+
+# Create a systemd service file for Node Exporter
+cat <<EOF | sudo tee /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd to apply the new service and start Node Exporter
+sudo systemctl daemon-reload
+sudo systemctl enable node_exporter
+sudo systemctl start node_exporter
+
+# Append the Node Exporter job to the Prometheus configuration file
+cat <<EOF | sudo tee -a /etc/prometheus/prometheus.yml
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+EOF
+sudo systemctl restart prometheus.service
+
+# Install PostgreSQL Exporter
+export PG_EXPORTER_VERSION="0.15.0"
+wget https://github.com/prometheus-community/postgres_exporter/releases/download/v$PG_EXPORTER_VERSION/postgres_exporter-$PG_EXPORTER_VERSION.$PG_EXPORTER_ARCH.tar.gz
+tar xvfz postgres_exporter-$PG_EXPORTER_VERSION.$PG_EXPORTER_ARCH.tar.gz
+sudo mv postgres_exporter-$PG_EXPORTER_VERSION.$PG_EXPORTER_ARCH/postgres_exporter /usr/local/bin/
+
+# Create a PostgreSQL Exporter user
+sudo useradd --no-create-home --shell /bin/false postgres_exporter
+
+# Set up environment variables for PostgreSQL Exporter
+echo "DATA_SOURCE_NAME='postgresql://postgres:postgres@localhost:5432/?sslmode=disable'" | sudo tee -a /etc/environment
+
+# Create a systemd service file for PostgreSQL Exporter
+cat <<EOF | sudo tee /etc/systemd/system/postgres_exporter.service
+[Unit]
+Description=Prometheus PostgreSQL Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=postgres_exporter
+Group=postgres_exporter
+EnvironmentFile=/etc/environment
+ExecStart=/usr/local/bin/postgres_exporter
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd, enable and start the PostgreSQL Exporter service
+sudo systemctl daemon-reload
+sudo systemctl enable postgres_exporter
+sudo systemctl start postgres_exporter
+
+# Append the PostgreSQL Exporter job to the Prometheus configuration file
+cat <<EOF | sudo tee -a /etc/prometheus/prometheus.yml
+  - job_name: 'postgres_exporter'
+    static_configs:
+      - targets: ['localhost:9187']
+EOF
+
+# Reload Prometheus to apply the new configuration
+sudo systemctl restart prometheus
+
+
+# Install Grafana
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository "deb https://packages.grafana.com/oss/deb stable main"
+wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+sudo apt-get update
+sudo apt-get install -y grafana
+
+# Enable and start the Grafana server
+sudo systemctl enable grafana-server
+sudo systemctl start grafana-server
+    SHELL
+  end
+end
